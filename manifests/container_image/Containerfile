@@ -1,0 +1,30 @@
+# Use the official UBI image as a base
+FROM registry.access.redhat.com/ubi8/ubi-minimal:8.10
+
+# Set the working directory
+WORKDIR /app
+
+# Install required packages and dependencies
+RUN microdnf install golang -y
+
+# Copy the Go application source code
+COPY . .
+
+# Build the Go application
+RUN go build -o apigator_dora_router cmd/router.go
+
+# Use UBI minimal as the base image for the runtime
+FROM registry.access.redhat.com/ubi8/ubi-minimal:8.10
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the built application from the builder stage
+COPY --from=0 /app/apigator_dora_router .
+
+# Expose port 8080
+EXPOSE 8080
+
+# Command to run the application
+CMD ["./apigator_dora_router"]
+

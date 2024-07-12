@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dora-router-config
+  labels:
+    app: dora-router
+    project: api-gator
+    company: exate
+data:
+  config.ini: |
+    [router]
+    host = "0.0.0.0"
+    port = 8080
+    path = "/forward"
+
+    [common]
+    # APIGator paths
+    dataset_path = "/apigator/protect/v1/dataset"
+    auth_path    = "/apigator/identity/v1/token"
+    # APIgator authentiation type
+    grant_type   = "client_credentials"
+    # timeout for a request in seconds
+    timeout      = 40
+
+
+    # Every APIGator instance configured as a Target must be defined in a separe
+    # INI section called "api_gator_*". The last part can be a number, or a suffix,
+    # but it will not impact on the DoraRouter behaviour. If you want to asign it a
+    # meaninful name, use the "name" field instead.
+
+    # First APIGator
+    [api_gator_1]
+    name = "ALPHA"
+    host = "https://api.exate.co"
+    port = 443
+    client_id = "************"
+    client_secret = "************"
+    api_key = "************"
+
+    # Second APIGator
+    [api_gator_2]
+    name = "OMEGA"
+    host = "https://api.exate.co"
+    port = 443
+    client_id = "************"
+    client_secret = "************"
+    api_key = "************"

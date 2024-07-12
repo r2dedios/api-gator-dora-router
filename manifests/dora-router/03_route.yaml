@@ -1,0 +1,18 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: dora-router
+  labels:
+    app: dora-router
+    project: api-gator
+    company: exate
+spec:
+  to:
+    kind: Service
+    name: dora-router
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+  wildcardPolicy: None
+

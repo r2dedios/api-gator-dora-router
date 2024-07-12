@@ -1,0 +1,64 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dora-router
+  labels:
+    app: dora-router
+    project: api-gator
+    company: exate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dora-router
+      project: api-gator
+  template:
+    metadata:
+      labels:
+        app: dora-router
+        project: api-gator
+    spec:
+      containers:
+        - name: router
+          image: quay.io/avillega/apigator_dora_router:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config.ini
+              subPath: config.ini
+      volumes:
+        - name: config-volume
+          configMap:
+            name: dora-router-config
+            items:
+              - key: config.ini
+                path: config.ini
+

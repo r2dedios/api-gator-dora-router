@@ -1,0 +1,20 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dora-router
+  labels:
+    app: dora-router
+    project: api-gator
+    company: exate
+spec:
+  type: ClusterIP
+  selector:
+      app: dora-router
+      project: api-gator
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+      name: http
+
