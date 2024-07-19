@@ -17,7 +17,7 @@ const (
 )
 
 func LoadConfig(fileName string, logger *zap.Logger) (*ag.APIGatorRouter, error) {
-	cfg, err := ini.Load(fileName)
+	cfg, err := ini.LoadSources(ini.LoadOptions{IgnoreInlineComment: true}, fileName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %v", err)
 	}
@@ -48,6 +48,20 @@ func LoadConfig(fileName string, logger *zap.Logger) (*ag.APIGatorRouter, error)
 		return nil, fmt.Errorf("failed to parse APIGatorRouter config: %v", err)
 	}
 	router.APIGatorTargets = APIGators
+
+	// Based on the score method configured in the INI config file, the router
+	// will be configured with the corresponding function for the choosen method
+	switch router.ScoreFuncName {
+	case "basic":
+		logger.Warn("Using Basic Response Evaluator")
+		router.ScoreFunc = ag.BasicEvaluator
+	case "percentage":
+		logger.Warn("Using Percentage Response Evaluator")
+		router.ScoreFunc = ag.PercentEvaluator
+	default:
+		logger.Warn("Using Default Response Evaluator")
+		router.ScoreFunc = ag.BasicEvaluator
+	}
 
 	logger.Info("Configuration Loaded Successfully", zap.Int("apigators_count", len(router.APIGatorTargets)))
 

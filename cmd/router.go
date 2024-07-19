@@ -1,3 +1,4 @@
+// Package main contains the main and auxiliar functions for the APIGatorDoraRouter.
 package main
 
 import (
@@ -20,64 +21,103 @@ import (
 )
 
 var (
-	router  *ag.APIGatorRouter
-	logger  *zap.Logger
+	// Router config struct for obtaining the configuration parameters of this
+	// router and the list of targets for broadcasting the incoming requests
+	router *ag.APIGatorRouter
+
+	// logger for the APIGatorDoraRouter. It's used across all this binary
+	logger *zap.Logger
+
+	// gRouter object for defining the GinFramework router instance for the HTTP server
 	gRouter *gin.Engine
 )
 
 const (
-	healthcheckPath = "/health"
+	// URL path for the Healthcheck handler. This was included for the K8s probes.
+	healthcheckPath = "/healthz"
 )
 
+// Init function for pre-configuring the global vars for the router
 func init() {
+	// Creating a new instance for the logger
 	logger = gLogger.NewLogger()
+
+	// Configures and creates a new Instance of the Gin Router for the HTTP server
 	gin.SetMode(gin.ReleaseMode)
 	gRouter = gin.New()
+
+	// Attaching the logger to the GIN server. This will forward Gin's logs to
+	// the same logger maintainning the structure and the output channels for
+	// logs
 	gRouter.Use(ginzap.Ginzap(logger, time.RFC3339, true))
 }
 
-func healthcheck(c *gin.Context) {
+// healthcheckHandler manages the incoming connections on the path "/healthz"
+// for evaulating K8s Startup/Readiness/Liveness probes
+func healthcheckHandler(c *gin.Context) {
 	logger.Info("Healthcheck probe requested")
 	c.JSON(http.StatusOK, gin.H{"health_status": "ok"})
 }
 
-func isRequestCorrect(resp *http.Response) bool {
+// evaluateResponse evaulates a HTTP response is valid or not using the
+// funciton referenced by args and returns a boolean value with the result
+func evaluateResponse(resp *http.Response, fp ag.APIGatorResponseEvaluator, restrictedText string) float64 {
 	var responseData map[string]interface{}
 
 	// Getting Response body as []bytes
 	respBodyBytes, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return false
+		return -1.0
 	}
-	defer resp.Body.Close()
-	// Restore Request Body
+	// Restore Request Body because it was supposed to be read just once
 	resp.Body = ioutil.NopCloser(bytes.NewBuffer(respBodyBytes))
 
+	// Unpackaging Response into JSON format
 	err = json.Unmarshal(respBodyBytes, &responseData)
 	if err != nil {
 		logger.Error("Failed to Unmarshal response body", zap.Error(err))
-		return false
+		return -1.0
 	}
 
-	// If the key exists, return the response
-	if _, exists := responseData["dataSet"]; exists && resp.StatusCode == http.StatusOK {
-		return true
+	// As the response from APIGator is always 200(OK) independently if it was
+	// able to decrypt the payload or not, the evaluation is performed based on a
+	// specific method configured on the INI file
+	if resp.StatusCode == http.StatusOK {
+		return fp(responseData, logger, restrictedText)
 	}
-
-	logger.Error("response does not contain the 'dataSet' key")
-	return false
+	return -1.0
 }
 
-func processResponses(responseChan <-chan http.Response) *http.Response {
+// processResponses reads every response obtained from the list of
+// APIGatorsTargets, and selects which is the best one based on the evaluation
+// function defined on the router's configuration
+func processResponses(responseChan <-chan http.Response, restrictedText string) *http.Response {
+	var bestResponse http.Response
+	var bestScore float64 = 0.0
+
+	// Reading every response and evaulatin its score
 	for resp := range responseChan {
-		if isRequestCorrect(&resp) {
-			return &resp
+		defer resp.Body.Close()
+		score := evaluateResponse(&resp, router.ScoreFunc, restrictedText)
+		logger.Debug("Evaluating Response", zap.Float64("score", score))
+		if score > bestScore {
+			logger.Debug("New Best Response", zap.Float64("score", score))
+			bestScore = score
+			bestResponse = resp
 		}
 	}
-	return nil
+	logger.Debug("Selected Response from APIGator", zap.String("score_method", router.ScoreFuncName), zap.Float64("score", bestScore))
+	return &bestResponse
 }
 
+// forwardRequest is the main HTTP handler function for the APIGatorDoraRouter.
+// It takes the incoming requests with the data to process, and forwards it to
+// every APIGator target defined on the config.ini file.
+// Depending on the scoring method chosen, the router will select a response
+// from among all those received by the different targets, to return it to the
+// originating requester.
 func forwardRequest(c *gin.Context) {
+	// Logging the origin IP of the requester
 	logger.Debug("Received Request", zap.String("origin", c.RemoteIP()))
 
 	// Obtainning JSON body from request
@@ -87,6 +127,7 @@ func forwardRequest(c *gin.Context) {
 		return
 	}
 
+	// Creating channel and WaitGroup for forwarding the request to the APIGatorTarget list in parallel
 	responseChan := make(chan http.Response, len(router.APIGatorTargets))
 	var wg sync.WaitGroup
 
@@ -101,22 +142,28 @@ func forwardRequest(c *gin.Context) {
 			return
 		}
 
-		// Simultaneous forwarding
+		// Simultaneous forwarding on parallel. Creating one thread per APIGator target
 		wg.Add(1)
+		//TODO: remove sleep. It's just for testing
+		time.Sleep(1 * time.Second)
 		go func(id int, apiGator *ag.APIGatorTarget) {
 			logger.Debug("Launching Forwarding thread", zap.Int("id", id))
 			if err := apiGator.ForwardRequestToAPIGator(&wg, jsonBytes, responseChan); err != nil {
-				logger.Error("Failed to send request", zap.String("apigator_target", apiGator.Name), zap.Error(err))
+				logger.Error("Failed to send request", zap.String("apigator_target", apiGator.Name), zap.String("request_body", string(jsonBytes)), zap.Error(err))
 			}
 			wg.Done()
 		}(i, apiGator)
 
 	}
-	// Wait for all requests to complete
+	// Wait for all requests to complete and closes the channel once every thread has answered
 	wg.Wait()
-	defer close(responseChan)
+	close(responseChan)
 
-	resp := processResponses(responseChan)
+	// Get 'restrictedText' field for each request. It will be used later for evaluating the response score
+	restrictedText := jsonData["restrictedText"].(string)
+
+	logger.Debug("Processing responses", zap.String("restricted_text", restrictedText))
+	resp := processResponses(responseChan, restrictedText)
 	if resp == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "No response"})
 		return
@@ -125,6 +172,8 @@ func forwardRequest(c *gin.Context) {
 	if err != nil {
 		return
 	}
+
+	// Responding best response
 	c.Writer.Write(respBodyBytes)
 }
 
@@ -148,7 +197,7 @@ func main() {
 	}
 
 	gRouter.POST(router.Path, forwardRequest)
-	gRouter.GET(healthcheckPath, healthcheck)
+	gRouter.GET(healthcheckPath, healthcheckHandler)
 	listenAddress := router.Host + ":" + fmt.Sprintf("%d", router.Port)
 
 	logger.Info("Listening for requests")

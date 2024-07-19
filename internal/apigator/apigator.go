@@ -27,6 +27,8 @@ type APIGatorRouter struct {
 	Port            int    `ini:"port"`
 	Path            string `ini:"path"`
 	APIGatorTargets []*APIGatorTarget
+	ScoreFuncName   string `ini:"score_function"`
+	ScoreFunc       APIGatorResponseEvaluator
 }
 
 // APIGatorTarget represents and APIGator server and authentication information for forwarding the incoming requests

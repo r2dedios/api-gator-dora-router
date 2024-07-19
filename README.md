@@ -26,9 +26,33 @@ The APIGatorDoraRouter follows the next steps for every incoming request:
     2. Sends the HTTP request to every APIGator instance (Multithreading)
     3. Waits for every APIGator response.
     4. Processes the responses looking for a correct one
-    5. If a correct response was found, returns its content as the response for
+    5. Based on configuration, this router will use different strategies for
+       choosing the correct response. Check 
+    6. If a correct response was found, returns its content as the response for
        the *requester* who started the process.
 
+
+## Configuration
+### Response Evaluation method
+Currently there are two supported ways for choosing the "best" response on the
+APIGatorDoraRouter:
+1. First valid response. This method will return the first response with a
+   correct data structure. Example:
+   ```json
+   {
+     "dataSet": "{\n  \"employees\": {\n    \"employee\": […]\n  }\n}"
+   }
+
+   ```
+
+   *To choose this method, edit the `config.ini` file on `[router].score_function='basic'*
+
+2. DataSet with more fields decrypted. This method will choose the response
+   based on which one has more decrypted information by APIGator. It takes the
+   `restricted_text` field for identifying the crypted fields, and scores each
+   response. The one with higher score (less crypted data) will be returned.
+
+   *To choose this method, edit the `config.ini` file on `[router].score_function='percentage'*
 
 ## Running on Local
 For an fast try on local, use the Makefile for starting the DoraRouter:
@@ -63,6 +87,25 @@ oc delete -f ./manifests/deployment
 For generating docs about the code, use the following command:
 ```sh
 make docs
+```
+
+## Testing
+There is a `scripts` folder on this repo which contains several scripts for
+testing this component and its interaction with APIGator
+
+Test script for APIGator:
+```sh
+# Generic command
+bash ./scripts/test_gator.sh <APIGATOR_URL> <API_KEY> <CLIENT_ID> <CLIENT_SECRET> <PAYLOAD_FILE>
+```
+
+Test script for APIGatorDoraRouter:
+```sh
+# Generic command
+bash ./scripts/test_router.sh <ROUTER_URL> <PAYLOAD_FILE>
+
+# Example command
+bash ./scripts/test_router.sh http://localhost:8080/forward ./tests/payload_example.json
 ```
 
 ## License
