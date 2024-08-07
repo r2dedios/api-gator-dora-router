@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,7 +62,7 @@ func healthcheckHandler(c *gin.Context) {
 
 // evaluateResponse evaulates a HTTP response is valid or not using the
 // funciton referenced by args and returns a boolean value with the result
-func evaluateResponse(resp *http.Response, fp ag.APIGatorResponseEvaluator, restrictedText string) float64 {
+func evaluateResponse(resp *http.Response, fp ag.APIGatorResponseEvaluator, restrictedText string, original string) float64 {
 	var responseData map[string]interface{}
 
 	// Getting Response body as []bytes
@@ -79,6 +80,16 @@ func evaluateResponse(resp *http.Response, fp ag.APIGatorResponseEvaluator, rest
 		return -1.0
 	}
 
+	// if the response is the same as the received request, it's discard
+	dataSet := responseData["dataSet"].(string)
+	str := strings.Replace(dataSet, "\n", "", -1)
+	str = strings.Replace(str, " ", "", -1)
+	str = strings.Replace(str, "\"", "'", -1)
+	if str == original {
+		logger.Warn("Detected Response without any change. Discarding...", zap.String("received", string(respBodyBytes)), zap.String("original", original))
+		return -1.0
+	}
+
 	// As the response from APIGator is always 200(OK) independently if it was
 	// able to decrypt the payload or not, the evaluation is performed based on a
 	// specific method configured on the INI file
@@ -91,14 +102,14 @@ func evaluateResponse(resp *http.Response, fp ag.APIGatorResponseEvaluator, rest
 // processResponses reads every response obtained from the list of
 // APIGatorsTargets, and selects which is the best one based on the evaluation
 // function defined on the router's configuration
-func processResponses(responseChan <-chan http.Response, restrictedText string) *http.Response {
+func processResponses(responseChan <-chan http.Response, restrictedText string, original string) *http.Response {
 	var bestResponse http.Response
 	var bestScore float64 = 0.0
 
 	// Reading every response and evaulatin its score
 	for resp := range responseChan {
 		defer resp.Body.Close()
-		score := evaluateResponse(&resp, router.ScoreFunc, restrictedText)
+		score := evaluateResponse(&resp, router.ScoreFunc, restrictedText, original)
 		logger.Debug("Evaluating Response", zap.Float64("score", score))
 		if score > bestScore {
 			logger.Debug("New Best Response", zap.Float64("score", score))
@@ -144,8 +155,10 @@ func forwardRequest(c *gin.Context) {
 
 		// Simultaneous forwarding on parallel. Creating one thread per APIGator target
 		wg.Add(1)
+
 		//TODO: remove sleep. It's just for testing
 		time.Sleep(1 * time.Second)
+
 		go func(id int, apiGator *ag.APIGatorTarget) {
 			logger.Debug("Launching Forwarding thread", zap.Int("id", id))
 			if err := apiGator.ForwardRequestToAPIGator(&wg, jsonBytes, responseChan); err != nil {
@@ -160,10 +173,16 @@ func forwardRequest(c *gin.Context) {
 	close(responseChan)
 
 	// Get 'restrictedText' field for each request. It will be used later for evaluating the response score
-	restrictedText := jsonData["restrictedText"].(string)
+	var restrictedText string
+	if jsonData != nil {
+		restrictedText = jsonData["restrictedText"].(string)
+	} else {
+		logger.Error("Incoming data JSON is empty!")
+		return
+	}
 
 	logger.Debug("Processing responses", zap.String("restricted_text", restrictedText))
-	resp := processResponses(responseChan, restrictedText)
+	resp := processResponses(responseChan, restrictedText, jsonData["dataSet"].(string))
 	if resp == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "No response"})
 		return

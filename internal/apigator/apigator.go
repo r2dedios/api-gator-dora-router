@@ -153,7 +153,7 @@ func (a *APIGatorTarget) ForwardRequestToAPIGator(wg *sync.WaitGroup, body []byt
 			a.Logger.Debug("Response correct from APIGator")
 			responseChan <- *resp
 			return nil
-		} else if resp.StatusCode > 400 && resp.StatusCode < 600 { // Every HTTP RC 4XX and 5XX
+		} else if resp.StatusCode >= 400 && resp.StatusCode <= 600 { // Every HTTP RC 4XX and 5XX
 			respBodyBytes, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
 				return err
