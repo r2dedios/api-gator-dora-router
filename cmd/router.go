@@ -2,7 +2,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	ag "exate-dora-router/internal/apigator"
 	cfg "exate-dora-router/internal/config"
@@ -13,7 +12,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -60,67 +58,6 @@ func healthcheckHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"health_status": "ok"})
 }
 
-// evaluateResponse evaulates a HTTP response is valid or not using the
-// funciton referenced by args and returns a boolean value with the result
-func evaluateResponse(resp *http.Response, fp ag.APIGatorResponseEvaluator, restrictedText string, original string) float64 {
-	var responseData map[string]interface{}
-
-	// Getting Response body as []bytes
-	respBodyBytes, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return -1.0
-	}
-	// Restore Request Body because it was supposed to be read just once
-	resp.Body = ioutil.NopCloser(bytes.NewBuffer(respBodyBytes))
-
-	// Unpackaging Response into JSON format
-	err = json.Unmarshal(respBodyBytes, &responseData)
-	if err != nil {
-		logger.Error("Failed to Unmarshal response body", zap.Error(err))
-		return -1.0
-	}
-
-	// if the response is the same as the received request, it's discard
-	dataSet := responseData["dataSet"].(string)
-	str := strings.Replace(dataSet, "\n", "", -1)
-	str = strings.Replace(str, " ", "", -1)
-	str = strings.Replace(str, "\"", "'", -1)
-	if str == original {
-		logger.Warn("Detected Response without any change. Discarding...", zap.String("received", string(respBodyBytes)), zap.String("original", original))
-		return -1.0
-	}
-
-	// As the response from APIGator is always 200(OK) independently if it was
-	// able to decrypt the payload or not, the evaluation is performed based on a
-	// specific method configured on the INI file
-	if resp.StatusCode == http.StatusOK {
-		return fp(responseData, logger, restrictedText)
-	}
-	return -1.0
-}
-
-// processResponses reads every response obtained from the list of
-// APIGatorsTargets, and selects which is the best one based on the evaluation
-// function defined on the router's configuration
-func processResponses(responseChan <-chan http.Response, restrictedText string, original string) *http.Response {
-	var bestResponse http.Response
-	var bestScore float64 = 0.0
-
-	// Reading every response and evaulatin its score
-	for resp := range responseChan {
-		defer resp.Body.Close()
-		score := evaluateResponse(&resp, router.ScoreFunc, restrictedText, original)
-		logger.Debug("Evaluating Response", zap.Float64("score", score))
-		if score > bestScore {
-			logger.Debug("New Best Response", zap.Float64("score", score))
-			bestScore = score
-			bestResponse = resp
-		}
-	}
-	logger.Debug("Selected Response from APIGator", zap.String("score_method", router.ScoreFuncName), zap.Float64("score", bestScore))
-	return &bestResponse
-}
-
 // forwardRequest is the main HTTP handler function for the APIGatorDoraRouter.
 // It takes the incoming requests with the data to process, and forwards it to
 // every APIGator target defined on the config.ini file.
@@ -139,7 +76,7 @@ func forwardRequest(c *gin.Context) {
 	}
 
 	// Creating channel and WaitGroup for forwarding the request to the APIGatorTarget list in parallel
-	responseChan := make(chan http.Response, len(router.APIGatorTargets))
+	responseChan := make(chan ag.APIGatorResponse, len(router.APIGatorTargets))
 	var wg sync.WaitGroup
 
 	// Forwarding to the list of APIGator instances simultaneously
@@ -187,13 +124,46 @@ func forwardRequest(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "No response"})
 		return
 	}
-	respBodyBytes, err := ioutil.ReadAll(resp.Body)
+	respBodyBytes, err := ioutil.ReadAll(resp.Response.Body)
 	if err != nil {
 		return
 	}
 
 	// Responding best response
+	logger.Info("Responding back to requester",
+		zap.String("apigator_target", resp.Name),
+	)
 	c.Writer.Write(respBodyBytes)
+}
+
+// processResponses reads every response obtained from the list of
+// APIGatorsTargets, and selects which is the best one based on the evaluation
+// function defined on the router's configuration
+func processResponses(responseChan <-chan ag.APIGatorResponse, restrictedText string, original string) *ag.APIGatorResponse {
+	// TODO: test with pointer
+	var bestResponse ag.APIGatorResponse
+	var bestScore float64 = 0.0
+	var name string
+
+	// Reading every response and evaulatin its score
+	for r := range responseChan {
+		defer r.Response.Body.Close()
+		score := r.EvaluateResponse(router.ScoreFunc, restrictedText, original, logger)
+		logger.Debug("Evaluating Response", zap.Float64("score", score))
+		if score > bestScore {
+			logger.Debug("New Best Response", zap.Float64("score", score))
+			bestScore = score
+			bestResponse = r
+			name = r.Name
+		}
+	}
+
+	logger.Debug("Selected Response from APIGator",
+		zap.String("score_method", router.ScoreFuncName),
+		zap.String("apigator", name),
+		zap.Float64("score", bestScore),
+	)
+	return &bestResponse
 }
 
 func main() {

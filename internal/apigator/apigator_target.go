@@ -20,17 +20,6 @@ const (
 	MAX_ATTEMPTS = 5
 )
 
-// APIGatorRouter defines the global configuration object for this Dora Router
-// software. It also includes the list of APIGators to forward the request
-type APIGatorRouter struct {
-	Host            string `ini:"host"`
-	Port            int    `ini:"port"`
-	Path            string `ini:"path"`
-	APIGatorTargets []*APIGatorTarget
-	ScoreFuncName   string `ini:"score_function"`
-	ScoreFunc       APIGatorResponseEvaluator
-}
-
 // APIGatorTarget represents and APIGator server and authentication information for forwarding the incoming requests
 type APIGatorTarget struct {
 	Name         string `ini:"name"`
@@ -115,7 +104,7 @@ func (a *APIGatorTarget) UpdateRequestHeaders(req *http.Request) error {
 // If the APIGator returns 401 (Unauthorized) it requests a new Access Token, creates a new request with the updated Headers and try again
 // If the APIGator returns 400 (Bad Request) it creates a new request with the updated Headers and try again
 // If the APIGator returns 200 (OK) it finishes and returns the response
-func (a *APIGatorTarget) ForwardRequestToAPIGator(wg *sync.WaitGroup, body []byte, responseChan chan<- http.Response) error {
+func (a *APIGatorTarget) ForwardRequestToAPIGator(wg *sync.WaitGroup, body []byte, responseChan chan<- APIGatorResponse) error {
 	for attempts := 0; attempts < MAX_ATTEMPTS; attempts++ {
 		var resp *http.Response
 
@@ -151,7 +140,10 @@ func (a *APIGatorTarget) ForwardRequestToAPIGator(wg *sync.WaitGroup, body []byt
 			continue
 		} else if resp.StatusCode == http.StatusOK { // Response correct (200 OK)
 			a.Logger.Debug("Response correct from APIGator")
-			responseChan <- *resp
+			responseChan <- APIGatorResponse{
+				Response: *resp,
+				Name:     a.Name,
+			}
 			return nil
 		} else if resp.StatusCode >= 400 && resp.StatusCode <= 600 { // Every HTTP RC 4XX and 5XX
 			respBodyBytes, err := ioutil.ReadAll(resp.Body)
