@@ -22,34 +22,37 @@ spec:
       containers:
         - name: router
           image: quay.io/avillega/apigator_dora_router:latest
+          env:
+            - name: APIGATOR_DORA_ROUTER_LOG_LEVEL
+              value: "DEBUG"
           ports:
             - containerPort: 8080
               name: http
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "250m"
+              memory: "32Mi"
+              cpu: "100m"
             limits:
               memory: "256Mi"
-              cpu: "500m"
+              cpu: "1000m"
           readinessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 8080
-            initialDelaySeconds: 5
+            initialDelaySeconds: 1
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            initialDelaySeconds: 2
+            periodSeconds: 20
           startupProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            initialDelaySeconds: 0
+            periodSeconds: 1
           volumeMounts:
             - name: config-volume
               mountPath: /app/config.ini

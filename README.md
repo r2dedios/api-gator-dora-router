@@ -79,8 +79,10 @@ make push
 The manifests for deploying the APIGator Dora Router on Openshift are available
 on: `./manifests/deployment`
 ```sh
-oc apply -f ./manifests/deployment
-oc delete -f ./manifests/deployment
+oc new-project exate-dora-router
+CONFIG_FILE=<YOUR_CONFIG_FILE ENV FILE>
+oc create configmap dora-router-config --from-file=$CONFIG_FILE
+oc apply -f ./manifests/dora-router
 ```
 
 ## Code Docs
@@ -107,6 +109,10 @@ bash ./scripts/test_router.sh <ROUTER_URL> <PAYLOAD_FILE>
 # Example command
 bash ./scripts/test_router.sh http://localhost:8080/forward ./tests/payload_example.json
 ```
+
+## Demo
+This repo includes a script for demoing how the APIGatorDoraRouter works. Check
+this [document](./demo/README.md) for more info.
 
 ## License
 This software is released and distributed under the [Apache 2.0
