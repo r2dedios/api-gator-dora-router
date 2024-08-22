@@ -229,6 +229,7 @@ function main () {
     return $ERR
   fi
 
+
   # Login Stage
   ############################################################
 	# Using the DECODER properties for login and obtain a token
@@ -255,6 +256,7 @@ function main () {
   parsed_dataSet=$(parse_data "$crypted_result")
   echo "$parsed_dataSet" > ./dataset.json
 
+
   # Forwarding to Router Stage
   ############################################################
   echo_inf "Forwarding encoded result to APIGatorDoraRouter"
@@ -263,14 +265,17 @@ function main () {
   echo_debug "Router Response: \n$(echo $router_response)"
   echo_debug "Expected Response:\n$(cat $APIGATOR_ENCODER_PAYLOAD_FILE | jq)"
 
+
   # Comparing results Stage
   ############################################################
   echo_inf "Evaluating results:"
-
   echo_inf "Diff between encoded dataSet and Router response"
   echo_inf "\033[33mEncoded Dataset:                                       |  Router Response:\033[0m"
   diff --color --side-by-side <(echo $crypted_result | jq) <(echo "$router_response") | colordiff
 
+
+  # Print results stage
+  ############################################################
 	echo "$router_response" > router_response.json
 	hash_router_response=($(md5sum router_response.json))
 	hash_expected_response=($(md5sum $APIGATOR_ENCODER_PAYLOAD_EXPECTED_FILE))
